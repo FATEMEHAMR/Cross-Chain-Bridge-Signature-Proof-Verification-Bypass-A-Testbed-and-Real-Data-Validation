@@ -8,12 +8,6 @@ This repository is the practical artifact of a BSc thesis on bridge security. It
 a STRIDE-based classification of real-world incidents and a quantitative gas-overhead study
 of a hardening mechanism.
 
-> **خلاصه‌ی فارسی:** این مخزن، بستر آزمایشی (testbed) پایان‌نامه‌ای درباره‌ی امنیت پل‌های
-> بین‌زنجیره‌ای است. سه زیرنوع حمله‌ی «دور زدن تایید امضا و اثبات» (جعل امضا، بازپخش پیام،
-> و امضای معتبر برای پیام نادرست) را روی قراردادهای آسیب‌پذیر بازتولید می‌کند، یک مکانیزم
-> سخت‌سازی مبتنی بر EIP-712 و OpenZeppelin ارائه می‌دهد، و سربار گس آن را اندازه می‌گیرد.
-> بخش دوم مخزن، همین نتایج را روی قرارداد و state واقعی زنجیره (با fork) اعتبارسنجی می‌کند.
-
 ---
 
 ## What this project does
