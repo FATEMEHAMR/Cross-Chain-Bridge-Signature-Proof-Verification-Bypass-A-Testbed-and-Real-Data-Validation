@@ -1,7 +1,0 @@
-.env
-out/
-cache/
-broadcast/
-data/*.csv
-data/*.json
-!data/.gitkeep
