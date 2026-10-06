@@ -1,155 +1,167 @@
-# bridge-realdata
+# Cross-Chain Bridge Signature/Proof Verification Bypass: A Testbed and Real-Data Validation
 
-بازتولید حمله‌های پل روی داده و state واقعی زنجیره (فورک mainnet)، به‌عنوان مکمل
-testbed مصنوعی پایان‌نامه. این پروژه جداست تا اعداد فصل ۵ مخزن اصلی دست‌نخورده بماند
-و قراردادهای واقعی (که با solc های قدیمی‌تر کامپایل می‌شوند) تداخلی ایجاد نکنند.
+A Foundry-based testbed that reproduces and hardens against the three main subtypes of
+signature and proof verification bypass in cross-chain bridges, and validates the results
+against real contracts and real chain state on Ethereum mainnet.
 
-این بسته سه چیز را فراهم می‌کند:
-1. ساخت دیتاست واقعی حوادث (فاز A) از یک منبع عمومی قابل بازتولید.
-2. بازتولید حمله‌ی واقعی Nomad روی state واقعی mainnet، به‌همراه اصلاح ریشه و تست «پیش/پس».
-3. هارنس اندازه‌گیری گس روی تراکنش‌های مشروع واقعی (حل مشکل «انحراف معیار صفر»).
+This repository is the practical artifact of a BSc thesis on bridge security. It accompanies
+a STRIDE-based classification of real-world incidents and a quantitative gas-overhead study
+of a hardening mechanism.
 
-> توجه مهم: تست‌های داخل `test/fork/` به یک RPC آرشیوی mainnet نیاز دارند و بدون
-> آن اجرا نمی‌شوند. کامپایل (`forge build`) بدون RPC کار می‌کند، اجرای تست‌ها نه.
-
----
-
-## پیش‌نیازها
-
-- Foundry (نسخه‌ی تأییدشده‌ی این بسته: `1.5.1`). نصب: https://book.getfoundry.sh
-- یک RPC آرشیوی mainnet. Alchemy پلن رایگان کافی است (از ایران معمولاً VPN لازم است).
-- کلید API اتراسکن (رایگان) برای جمع‌آوری تراکنش‌های مشروع.
-- Python 3 برای اسکریپت‌های دیتاست و تحلیل.
+> **خلاصه‌ی فارسی:** این مخزن، بستر آزمایشی (testbed) پایان‌نامه‌ای درباره‌ی امنیت پل‌های
+> بین‌زنجیره‌ای است. سه زیرنوع حمله‌ی «دور زدن تایید امضا و اثبات» (جعل امضا، بازپخش پیام،
+> و امضای معتبر برای پیام نادرست) را روی قراردادهای آسیب‌پذیر بازتولید می‌کند، یک مکانیزم
+> سخت‌سازی مبتنی بر EIP-712 و OpenZeppelin ارائه می‌دهد، و سربار گس آن را اندازه می‌گیرد.
+> بخش دوم مخزن، همین نتایج را روی قرارداد و state واقعی زنجیره (با fork) اعتبارسنجی می‌کند.
 
 ---
 
-## راه‌اندازی
+## What this project does
+
+1. **Classifies** three subtypes of the signature/proof verification bypass attack family,
+   grounded in documented real-world bridge incidents and mapped to the STRIDE threat model.
+2. **Reproduces** each subtype on a minimal vulnerable bridge contract in a controlled
+   two-chain testbed, and proves a shared hardening mechanism blocks all three without
+   breaking the legitimate user path (a before/after protocol).
+3. **Measures** the gas overhead of the hardening mechanism, including a controlled
+   "gas ladder" that isolates the net cost of each security check.
+4. **Validates** the findings on real data: it reproduces the real Nomad Bridge attack on
+   its original contract via a mainnet fork, proves a root-cause fix blocks it, and measures
+   legitimate-path gas on real historical user transactions.
+
+The attack subtypes:
+
+| Subtype | Reference incident | Root cause |
+|---|---|---|
+| Signature forgery | Nomad, Chainswap | zero-address / default value accepted as a valid attestation |
+| Message replay | Polygon Plasma | no nonce or used-message tracking |
+| Valid signature, wrong message | Gnosis Omni, cross-chain replay | hash omits chainId and contract address |
+
+The hardening mechanism combines four checks in one path: reject the zero address, enforce
+EIP-712 domain-separated hashing (binding chainId and contract address), enforce nonce
+uniqueness, and bound signature `s` to the lower half of the group (EIP-2, malleability).
+Checks 1, 2 and 4 use the official OpenZeppelin Contracts v5.1.0 libraries directly.
+
+---
+
+## Repository layout
+
+This repository has two parts.
+
+### Part 1: synthetic testbed (`bridge-testbed/`)
+
+```
+src/
+  SourceBridge.sol                 lock/burn on the source chain
+  vulnerable/                      one contract per attack subtype
+  hardened/                        EIP-712 + ECDSA hardened bridge (single and 2-of-3 multisig)
+  gascontrol/                      controlled gas ladder (L0..L4) and zero references
+test/                              forge tests: attacks, defenses, gas, cross-chain flow
+script/                            deploy and relayer scripts
+results/                          recorded output of real runs
+```
+
+### Part 2: real-data validation (`bridge-realdata/`)
+
+```
+test/fork/
+  NomadReal.t.sol                  real Nomad attack + state-fix before/after (mainnet fork)
+  GasReplayReal.t.sol              gas of real legitimate user transactions
+  ChainswapReal.t.sol              template for the Chainswap case
+scripts/
+  fetch_incidents.py               build the incident dataset from the DefiLlama Hacks API
+  fetch_legit_txs.py               collect real legitimate transactions from Etherscan (V2)
+  analyze_gas.py                   mean/median/stdev of measured gas
+```
+
+---
+
+## Requirements
+
+- [Foundry](https://book.getfoundry.sh) (tested on `1.5.1`)
+- Solidity `0.8.20` (resolved by Foundry)
+- For Part 2 only: an archive mainnet RPC (Alchemy free tier works), an Etherscan API key,
+  and Python 3
+
+---
+
+## Running Part 1 (synthetic testbed)
 
 ```bash
-cp .env.example .env
-# مقادیر MAINNET_RPC_URL و ETHERSCAN_API_KEY را در .env بگذارید
-
-forge build          # باید بدون خطا کامپایل شود (بدون نیاز به RPC)
+cd bridge-testbed
+forge test                 # run all tests
+forge test --gas-report    # include the gas tables used in the thesis
 ```
 
-برای اینکه Foundry متغیرهای `.env` را ببیند، یا از `--rpc-url $MAINNET_RPC_URL` استفاده
-کنید یا قبل از اجرا متغیرها را لود کنید:
+All tests are self-contained and need no network.
+
+## Running Part 2 (real-data validation)
 
 ```bash
-# لینوکس / مک
-export $(grep -v '^#' .env | xargs)
-# ویندوز PowerShell
-Get-Content .env | Where-Object {$_ -notmatch '^#'} | ForEach-Object { $p=$_.Split('=',2); [Environment]::SetEnvironmentVariable($p[0],$p[1]) }
+cd bridge-realdata
+cp .env.example .env        # fill in MAINNET_RPC_URL and ETHERSCAN_API_KEY
+forge build
+
+# Real Nomad attack + defense on real mainnet state
+forge test --match-path test/fork/NomadReal.t.sol --rpc-url $MAINNET_RPC_URL -vvv
+
+# Gas of real legitimate user transactions
+python scripts/fetch_legit_txs.py
+forge test --match-test test_ReplayLegitTxs_MeasureGas --rpc-url $MAINNET_RPC_URL -vv
+python scripts/analyze_gas.py
+
+# Incident dataset (no RPC needed)
+python scripts/fetch_incidents.py
 ```
+
+The fork tests require an archive RPC. The first run is slow because state is downloaded
+from the RPC; Foundry caches it afterwards.
 
 ---
 
-## گام ۱: دیتاست واقعی حوادث (فاز A)
+## Results summary
 
-```bash
-python3 scripts/fetch_incidents.py
-```
-خروجی `data/incidents_raw.csv` است (حوادث پل در بازه‌ی مارس ۲۰۲۱ تا دسامبر ۲۰۲۳،
-از API عمومی DefiLlama، معیار IC4). سپس ستون‌های `subtype`، `stride`، `ccf_component`،
-`has_poc` و `include_decision` را دستی و طبق معیارهای IC1 تا IC3 فصل ۳ تکمیل کنید.
-همین فیلتر قابل‌بازتولید، جمله‌ی «۱۲ حادثه از REKT» را به یک دیتاست عمومی تبدیل می‌کند.
+**Defense effectiveness (synthetic testbed).** All three attack subtypes succeed on the
+vulnerable contracts and are blocked on the hardened contract, while the legitimate user
+path stays open. The 2-of-3 multisig variant preserves all three defenses.
 
----
+**Gas overhead (synthetic testbed).** The hardening mechanism adds roughly 14% gas on
+average across the three subtypes. The controlled gas ladder shows the net cost of the
+security checks themselves is about 4,435 gas, over 84% of which is the `ecrecover` call.
+The multisig variant adds roughly 11% on top of the single-attester hardened bridge.
 
-## گام ۲: حمله‌ی واقعی Nomad + تست پیش/پس
-
-ابتدا slot نگاشت `confirmAt` را روی قرارداد واقعی به‌صورت تجربی تأیید کنید:
-
-```bash
-forge test --match-test test_FindConfirmAtSlot -vvv
-```
-عددی که چاپ می‌شود (slot ای که برای کلید `0x00` مقدار `1` دارد) را در بالای فایل
-`test/fork/NomadReal.t.sol` در ثابت `CONFIRM_AT_SLOT` بگذارید.
-
-سپس:
-
-```bash
-# مرحله ۱: حمله روی قرارداد واقعی در بلوک قبل از هک، باید موفق شود
-forge test --match-test test_RealNomad_AttackSucceeds -vvv
-
-# مرحله ۳: همان حمله پس از اصلاح state، باید شکست بخورد
-forge test --match-test test_RealNomad_AttackFails_AfterStateFix -vvv
-```
-
-این جفت، همان پروتکل «پیش/پس» پایان‌نامه است، این بار روی state واقعی mainnet.
-اصلاح به‌کاررفته دقیقاً ریشه‌ی واقعی حادثه است: برگرداندن `confirmAt[0x00]` از `1`
-به `0`. پیش از نوشتن، تست تأیید می‌کند مقدار فعلی واقعاً `1` است (تا داور مطمئن شود
-slot درست انتخاب شده).
-
-اجرای اول کند است چون state از RPC دانلود می‌شود؛ بعد در `~/.foundry/cache/rpc`
-کش می‌شود.
+**Real-data validation.** The real Nomad attack was reproduced on its original contract at
+block 15,259,100 (minting 100 WBTC to the attacker) and blocked by a root-cause state fix.
+Legitimate-path gas measured on six real user transactions gives a median of 165,763 gas
+(mean 223,584, standard deviation 137,082), confirming a real, non-degenerate distribution.
 
 ---
 
-## گام ۳: گس روی تراکنش‌های مشروع واقعی
+## Sources and attribution
 
-```bash
-export $(grep -v '^#' .env | xargs)
-python3 scripts/fetch_legit_txs.py           # data/legit_txs.json
-forge test --match-test test_ReplayLegitTxs_MeasureGas -vv   # data/gas_real.csv
-python3 scripts/analyze_gas.py               # میانگین/انحراف معیار/میانه
-```
-برای هر تراکنش، state دقیقاً قبل از همان تراکنش فورک و همان فراخوانی دوباره اجرا
-می‌شود. چون calldata تراکنش‌های واقعی با هم فرق دارد، توزیع واقعی گس به دست می‌آید و
-مشکل «انحراف معیار صفر» رفع می‌شود.
+- Incident patterns and attack calldata: [DeFiHackLabs](https://github.com/SunWeb3Sec/DeFiHackLabs)
+- Incident dataset: [DefiLlama Hacks API](https://api.llama.fi/hacks)
+- Classification framework: Notland et al., "SoK: Cross-Chain Bridging Architectural Design
+  Flaws and Mitigations" ([arXiv:2403.00405](https://arxiv.org/abs/2403.00405))
+- Cryptographic standards: EIP-2, EIP-712
+- Libraries: OpenZeppelin Contracts v5.1.0 (`ECDSA.sol`, `EIP712.sol`, `ERC20.sol`)
 
-نکته: اگر اسکریپت تراکنشی پیدا نکرد، `WANTED_SELECTORS` در `scripts/fetch_legit_txs.py`
-را خالی کنید یا selector ها را با `cast sig 'process(bytes)'` تأیید کنید.
+See `bridge-testbed/SOURCES_AND_ETHICS.md` for a full per-file attribution.
 
 ---
 
-## گام ۴ (اختیاری): Chainswap و Poly Network
+## Ethics and scope
 
-قالب `test/fork/ChainswapReal.t.sol` آماده است و فعلاً `skip` می‌شود. برای تکمیل،
-مراحل داخل همان فایل را دنبال کنید (گرفتن سورس proxy با `forge clone`، استخراج
-selector و امضاها از PoC، و برداشتن `vm.skip`). ریشه‌ی واقعی Chainswap با مدل فعلی
-testbed کمی فرق دارد؛ توضیحش در همان فایل آمده و باید در فصل ۲ هم اصلاح شود.
-
----
-
-## اجرای همه‌ی تست‌های فورک
-
-```bash
-export $(grep -v '^#' .env | xargs)
-forge test --match-path "test/fork/*" -vv
-```
+All vulnerable contracts exist only inside this local testbed and are never deployed
+publicly. They are for educational and research use, to understand how these attacks work
+and to demonstrate effective defenses. The threat model assumes an external attacker with
+full knowledge of the contract code but no control over attester private keys, so key-leak
+incidents (such as Ronin) are out of scope, as are incidents that cannot be reproduced with
+an EVM fork (such as Wormhole on Solana and the BNB Chain IAVL-proof case).
 
 ---
 
-## نقشه‌ی فایل‌ها
+## License
 
-```
-foundry.toml                      پیکربندی (rpc از .env)
-.env.example                      الگوی متغیرهای محیطی
-scripts/fetch_incidents.py        فاز A: دیتاست حوادث از DefiLlama
-scripts/fetch_legit_txs.py        تراکنش‌های مشروع واقعی از Etherscan
-scripts/analyze_gas.py            تحلیل آماری گس
-test/fork/NomadReal.t.sol         حمله‌ی واقعی Nomad + یافتن slot + پیش/پس
-test/fork/GasReplayReal.t.sol     گس روی تراکنش‌های مشروع واقعی
-test/fork/ChainswapReal.t.sol     قالب Chainswap (skip تا تکمیل)
-data/                             خروجی اسکریپت‌ها (در .gitignore)
-```
-
----
-
-## منابع
-
-- الگو و calldata حمله‌ها: DeFiHackLabs — https://github.com/SunWeb3Sec/DeFiHackLabs
-- دیتاست حوادث: DefiLlama Hacks API — https://api.llama.fi/hacks
-- تحلیل ریشه‌ی Nomad: CertiK post-mortem و تحلیل samczsun
-- چارچوب دسته‌بندی: Notland et al., "SoK: Cross-Chain Bridging..." (arXiv:2403.00405)
-
----
-
-## محدودیت‌ها (صداقت منبع)
-
-- محیط توسعه‌ی نویسنده‌ی این بسته به RPC بلاکچین دسترسی نداشت، پس تست‌های فورک فقط
-  کامپایل تأیید شده‌اند و باید روی سیستم شما با RPC واقعی اجرا شوند.
-- Wormhole (سولانا) و BNB Chain (اثبات IAVL) با فورک EVM بازتولید نمی‌شوند؛ خارج از دامنه.
-- Polygon Plasma هیچ‌وقت exploit نشد (با bug bounty پیدا شد)؛ بازتولیدش proof واقعی
-  لازم دارد. Gnosis Omni روی زنجیره‌ی ETHPoW بود و RPC آرشیوی‌اش کمیاب است.
+Code is provided for academic and educational use. See individual files for license headers.
+Vendored OpenZeppelin and forge-std retain their original licenses.
